@@ -210,7 +210,7 @@ class MRZPreprocessor:
 		return mrz_preprocessed
 
 
-def main(file_data):
+def mrz(file_data):
   """
   Main function to process MRZ from uploaded file data.
   
@@ -252,7 +252,7 @@ def main(file_data):
   # Preprocess MRZ image
   preprocessor = MRZPreprocessor(scale_factor=4.8)
   mrz_preprocessed = preprocessor.preprocess(mrz)
-  tessdata_dir = os.path.abspath("./custom")
+  tessdata_dir = os.path.abspath("./custom/best")
   tesseract_config = (
     f"--tessdata-dir {tessdata_dir} "
     "--psm 6 "
