@@ -71,9 +71,9 @@ The application will open in your default browser at `http://localhost:8501`
 ├── mrz.py               # MRZ detection and OCR logic
 ├── requirements.txt     # Python dependencies
 ├── custom/
-│   ├── best
+│   ├── best/
 │   │   └── mrz.traineddata  # Tesseract MRZ language data for best
-│   └── fast
+│   └── fast/
 │       └── mrz.traineddata  # Tesseract MRZ language data for fast
 └── readme.md            # This file
 ```
