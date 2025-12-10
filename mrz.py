@@ -210,76 +210,171 @@ class MRZPreprocessor:
 		return mrz_preprocessed
 
 
+class MRZParser:
+	"""Parse MRZ text for multiple document types (TD1, TD2, TD3, MRV-A, MRV-B)."""
+
+	def _clean(self, text: str) -> str:
+		return text.replace("<<", " ").replace("<", " ").strip()
+
+	def _split_names(self, names_raw: str):
+		cleaned = self._clean(names_raw)
+		if " " in cleaned:
+			family, given = cleaned.split(" ", 1)
+		else:
+			family, given = cleaned, ""
+		return family, given
+
+	def detect_type(self, lines):
+		line_count = len(lines)
+		lengths = [len(l) for l in lines]
+
+		if line_count == 3 and all(l >= 28 for l in lengths):
+			return "TD1"
+		if line_count == 2 and all(l >= 43 for l in lengths):
+			return "MRV-A" if lines[0].startswith("V") else "TD3"
+		if line_count == 2 and all(35 <= l < 43 for l in lengths):
+			return "MRV-B" if lines[0].startswith("V") else "TD2"
+		if line_count == 2 and all(33 <= l < 43 for l in lengths):
+			return "MRV-B"
+		return "UNKNOWN"
+
+	def parse_td3(self, lines):
+		row1, row2 = lines[-2:]
+		names = row1[5:44]
+		doc = row2[:9]
+		family, given = self._split_names(names)
+		return doc, family, given
+
+	def parse_td2(self, lines):
+		row1, row2 = lines[-2:]
+		names = row1[5:36]
+		doc = row2[:9]
+		family, given = self._split_names(names)
+		return doc, family, given
+
+	def parse_td1(self, lines):
+		# TD1 has three lines; document number on line 1, names on line 3
+		line1, _, line3 = lines[-3:]
+		doc = line1[5:14]
+		names = line3[:30]
+		family, given = self._split_names(names)
+		return doc, family, given
+
+	def parse_mrv_a(self, lines):
+		row1, row2 = lines[-2:]
+		names = row1[2:44]
+		doc = row2[:9]
+		family, given = self._split_names(names)
+		return doc, family, given
+
+	def parse_mrv_b(self, lines):
+		row1, row2 = lines[-2:]
+		names = row1[2:36]
+		doc = row2[:9]
+		family, given = self._split_names(names)
+		return doc, family, given
+
+	def parse(self, mrz_text: str):
+		lines = [ln.strip() for ln in mrz_text.splitlines() if ln.strip()]
+		if len(lines) < 2:
+			return {
+				"type": "UNKNOWN",
+				"document_number": None,
+				"family_name": None,
+				"given_names": None,
+			}
+
+		mrz_type = self.detect_type(lines)
+
+		parsers = {
+			"TD3": self.parse_td3,
+			"TD2": self.parse_td2,
+			"TD1": self.parse_td1,
+			"MRV-A": self.parse_mrv_a,
+			"MRV-B": self.parse_mrv_b,
+		}
+
+		parser_fn = parsers.get(mrz_type, self.parse_td3)
+		doc, family, given = parser_fn(lines)
+
+		return {
+			"type": mrz_type,
+			"document_number": self._clean(doc),
+			"family_name": family,
+			"given_names": given,
+		}
+
+
 def mrz(file_data):
-  """
-  Main function to process MRZ from uploaded file data.
-  
-  Args:
-    file_data: Streamlit UploadedFile object or file-like object
-    
-  Returns:
-    List containing [mrzText, PID, family_name, given_names]
-  """
-  if file_data is None:
-    return [None, None, None, None]
-  
-  # Read image from uploaded file
-  file_bytes = np.frombuffer(file_data.read(), np.uint8)
-  image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-  
-  if image is None:
-    print("[ERROR] could not decode image from uploaded file")
-    return [None, None, None, None]
+	"""
+	Main function to process MRZ from uploaded file data.
 
-  gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+	Args:
+		file_data: Streamlit UploadedFile object or file-like object
 
-  # Initialize kernel calculator and compute kernels
-  kernel_calc = KernelCalculator(
-    kernel_scale=0.06,
-    max_kernel=120,
-    kernel_vert_arg=None
-  )
-  rectKernel, sqKernel, vertKernel = kernel_calc.compute_kernels(gray)
+	Returns:
+		List containing [mrz_preprocessed, mrzText, PID, family_name, given_names]
+	"""
+	if file_data is None:
+		return [None, None, None, None, None]
 
-  # Detect MRZ region
-  detector = MRZDetector(gray, rectKernel, sqKernel, vertKernel, debug=False)
-  mrz = detector.detect(image)
+	# Read image from uploaded file
+	file_bytes = np.frombuffer(file_data.read(), np.uint8)
+	image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
 
-  if mrz is None:
-    print("[INFO] MRZ could not be found")
-    return [None, None, None, None]
+	if image is None:
+		print("[ERROR] could not decode image from uploaded file")
+		return [None, None, None, None, None]
 
-  # Preprocess MRZ image
-  preprocessor = MRZPreprocessor(scale_factor=4.8)
-  mrz_preprocessed = preprocessor.preprocess(mrz)
-  tessdata_dir = os.path.abspath("./custom/best")
-  tesseract_config = (
-    f"--tessdata-dir {tessdata_dir} "
-    "--psm 6 "
-    "-l mrz "
-    "-c load_system_dawg=F "
-    "-c load_freq_dawg=F "
-    "-c load_unambig_dawg=F "
-    "-c load_punc_dawg=F "
-    "-c load_number_dawg=F "
-    "-c load_fixed_length_dawgs=F "
-    "-c load_bigram_dawg=F "
-    "-c wordrec_enable_assoc=F "
-    "-c tessedit_char_whitelist=0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ<"
-  )
-  try:
-    mrzText = pytesseract.image_to_string(mrz_preprocessed, config=tesseract_config)
-  except Exception as e:
-    print(f"[ERROR] pytesseract failed: {e}")
-    return [None, None, None, None]
-  
-  mrzText = mrzText.replace(" ", "").strip()
+	gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-  [row1, row2] = mrzText.splitlines()[-2:]
+	# Initialize kernel calculator and compute kernels
+	kernel_calc = KernelCalculator(
+		kernel_scale=0.06,
+		max_kernel=120,
+		kernel_vert_arg=None
+	)
+	rectKernel, sqKernel, vertKernel = kernel_calc.compute_kernels(gray)
 
-  serialize = row1[5:44].replace("<<", " ").replace("<", "").strip()
-  PID = row2[:9].replace("<<", " ").replace("<", "").strip()
+	# Detect MRZ region
+	detector = MRZDetector(gray, rectKernel, sqKernel, vertKernel, debug=False)
+	mrz = detector.detect(image)
 
-  [family_name, given_names] = serialize.split(" ", 1) if " " in serialize else (serialize, "")
+	if mrz is None:
+		print("[INFO] MRZ could not be found")
+		return [None, None, None, None, None]
 
-  return [mrz_preprocessed, mrzText, PID, family_name, given_names]
+	# Preprocess MRZ image
+	preprocessor = MRZPreprocessor(scale_factor=4.8)
+	mrz_preprocessed = preprocessor.preprocess(mrz)
+	tessdata_dir = os.path.abspath("./custom/best")
+	tesseract_config = (
+		f"--tessdata-dir {tessdata_dir} "
+		"--psm 6 "
+		"-l mrz "
+		"-c load_system_dawg=F "
+		"-c load_freq_dawg=F "
+		"-c load_unambig_dawg=F "
+		"-c load_punc_dawg=F "
+		"-c load_number_dawg=F "
+		"-c load_fixed_length_dawgs=F "
+		"-c load_bigram_dawg=F "
+		"-c wordrec_enable_assoc=F "
+		"-c tessedit_char_whitelist=0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ<"
+	)
+	try:
+		mrzText = pytesseract.image_to_string(mrz_preprocessed, config=tesseract_config)
+	except Exception as e:
+		print(f"[ERROR] pytesseract failed: {e}")
+		return [None, None, None, None, None]
+
+	mrzText = mrzText.replace(" ", "").strip()
+
+	parser = MRZParser()
+	parsed = parser.parse(mrzText)
+	td_type = parsed.get("type")
+	PID = parsed.get("document_number")
+	family_name = parsed.get("family_name")
+	given_names = parsed.get("given_names")
+
+	return [mrz_preprocessed, mrzText, PID, family_name, given_names, td_type]
