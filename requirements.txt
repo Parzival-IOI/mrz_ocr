@@ -3,3 +3,5 @@ opencv-python-headless
 pytesseract
 imutils
 numpy
+xlsxwriter
+pandas
