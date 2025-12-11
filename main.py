@@ -29,7 +29,7 @@ if st.button("Submit"):
             st.error("Could not extract MRZ data from the image")
         else:
             st.write("MRZ Text")
-            st.markdown(f""">{mrzText}""")
+            st.markdown(f""">{mrzText.replace('\n', '  \n')}""")
 
             st.info(f"⏱️ Execution Time: {execution_time:.2f} seconds")
 

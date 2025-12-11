@@ -331,18 +331,18 @@ class MRZParser:
 
 	def parse_td1(self, lines):
 		# TD1 has three lines; document number on line 1, names on line 3
-		line1, _, line3 = lines[-3:]
+		line1, line2, line3 = lines[-3:]
 		names = line3[:30]
 		family, given = self._split_names(names)
 		doc_field = line1[5:14]
 		doc_cd = line1[14:15]
-		birth_field = lines[-2][0:6]
-		birth_cd = lines[-2][6:7]
-		exp_field = lines[-2][8:14]
-		exp_cd = lines[-2][14:15]
+		birth_field = line2[:6]
+		birth_cd = line2[6:7]
+		exp_field = line2[8:14]
+		exp_cd = line2[14:15]
 		optional1 = line1[15:30]
-		optional2 = lines[-2][18:29]
-		final_cd = lines[-2][29:30]
+		optional2 = line2[18:29]
+		final_cd = line2[29:30]
 		composite = doc_field + doc_cd + birth_field + birth_cd + exp_field + exp_cd + optional1 + optional2
 		return {
 			"type": "TD1",
@@ -528,7 +528,7 @@ def mrz(file_data):
 	# Preprocess MRZ image
 	preprocessor = MRZPreprocessor(scale_factor=4.8)
 	mrz_preprocessed = preprocessor.preprocess(mrz)
-	tessdata_dir = os.path.abspath("./custom/best")
+	tessdata_dir = os.path.abspath("./custom/fast")
 	tesseract_config = (
 		f"--tessdata-dir {tessdata_dir} "
 		"--psm 6 "
