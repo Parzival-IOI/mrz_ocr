@@ -6,13 +6,12 @@ from mrz import mrz
 def submit_action(file_data):
     start_time = time.time()
 
-    # mrz() is assumed to return 5 values now
-    mrz_preprocessed, mrzText, PID, family_name, given_names, td_type = mrz(file_data)
+    # mrz() now returns preprocessed image, raw text, and a parsed dict
+    mrz_preprocessed, mrzText, parsed = mrz(file_data)
 
     execution_time = time.time() - start_time
 
-    # return a flat 6-tuple
-    return mrz_preprocessed, mrzText, PID, family_name, given_names, td_type, execution_time
+    return mrz_preprocessed, mrzText, parsed, execution_time
 
 
 st.title("Streamlit Offical Travel Document")
@@ -24,18 +23,9 @@ if st.button("Submit"):
     if file_data is None:
         st.error("Please upload a file first")
     else:
-        # unpack exactly 7 values – must match submit_action()
-        (
-            mrz_preprocessed,
-            mrzText,
-            PID,
-            family_name,
-            given_names,
-            td_type,
-            execution_time,
-        ) = submit_action(file_data)
+        mrz_preprocessed, mrzText, parsed, execution_time = submit_action(file_data)
 
-        if mrzText is None:
+        if mrzText is None or parsed is None:
             st.error("Could not extract MRZ data from the image")
         else:
             st.write("MRZ Text")
@@ -44,14 +34,31 @@ if st.button("Submit"):
             st.info(f"⏱️ Execution Time: {execution_time:.2f} seconds")
 
             data = {
-                "Passport ID": PID,
-                "Family Name": family_name,
-                "Given Names": given_names,
-                "Document Type": td_type,
+                "Document Type": parsed.get("type"),
+                "Document Number": parsed.get("document_number"),
+                "Issuing Country": parsed.get("issuing_country"),
+                "Nationality": parsed.get("nationality"),
+                "Birth Date (YYMMDD)": parsed.get("birth_date"),
+                "Expiry Date (YYMMDD)": parsed.get("expiry_date"),
+                "Sex": parsed.get("sex"),
+                "Family Name": parsed.get("family_name"),
+                "Given Names": parsed.get("given_names"),
             }
+
+            # Only TD1 has optional fields 1 and 2
+            if parsed.get("type") == "TD1":
+                data["Optional Data 1"] = parsed.get("optional_data_1")
+                data["Optional Data 2"] = parsed.get("optional_data_2")
+            else:
+                data["Optional Data"] = parsed.get("optional_data")
 
             st.markdown("### Extracted Data")
             st.code(json.dumps(data, indent=2), language="json")
+
+            hashes = parsed.get("hashes")
+            if hashes:
+                st.markdown("### Hash Checks")
+                st.code(json.dumps(hashes, indent=2), language="json")
 
             st.image(mrz_preprocessed, caption="Preprocessed MRZ Image", width='stretch')
 

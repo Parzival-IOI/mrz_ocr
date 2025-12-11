@@ -213,6 +213,26 @@ class MRZPreprocessor:
 class MRZParser:
 	"""Parse MRZ text for multiple document types (TD1, TD2, TD3, MRV-A, MRV-B)."""
 
+	_weights = [7, 3, 1]
+
+	def _char_value(self, ch: str) -> int:
+		if ch.isdigit():
+			return int(ch)
+		if "A" <= ch <= "Z":
+			return ord(ch) - ord("A") + 10
+		return 0  # '<' or any other filler
+
+	def _check_digit(self, field: str) -> str:
+		total = 0
+		for i, ch in enumerate(field):
+			total += self._char_value(ch) * self._weights[i % 3]
+		return str(total % 10)
+
+	def _verify(self, field: str, digit: str) -> dict:
+		expected = self._check_digit(field)
+		found = digit or ""
+		return {"expected": expected, "found": found, "valid": expected == found}
+
 	def _clean(self, text: str) -> str:
 		return text.replace("<<", " ").replace("<", " ").strip()
 
@@ -241,38 +261,180 @@ class MRZParser:
 	def parse_td3(self, lines):
 		row1, row2 = lines[-2:]
 		names = row1[5:44]
-		doc = row2[:9]
 		family, given = self._split_names(names)
-		return doc, family, given
+		doc_field = row2[:9]
+		doc_cd = row2[9:10]
+		birth_field = row2[13:19]
+		birth_cd = row2[19:20]
+		exp_field = row2[21:27]
+		exp_cd = row2[27:28]
+		optional_field = row2[28:42]
+		optional_cd = row2[42:43]
+		final_cd = row2[43:44]
+		composite = doc_field + doc_cd + birth_field + birth_cd + exp_field + exp_cd + optional_field + optional_cd
+		return {
+			"type": "TD3",
+			"document_number": self._clean(doc_field),
+			"issuing_country": self._clean(row1[2:5]),
+			"nationality": self._clean(row2[10:13]),
+			"birth_date": birth_field,
+			"expiry_date": exp_field,
+			"sex": row2[20:21].replace("<", ""),
+			"optional_data": self._clean(optional_field),
+			"optional_data_1": None,
+			"optional_data_2": None,
+			"family_name": family,
+			"given_names": given,
+			"hashes": {
+				"document_number": self._verify(doc_field, doc_cd),
+				"birth_date": self._verify(birth_field, birth_cd),
+				"expiry_date": self._verify(exp_field, exp_cd),
+				"optional_data": self._verify(optional_field, row2[42:43]),
+				"final": self._verify(composite, final_cd),
+			},
+		}
 
 	def parse_td2(self, lines):
 		row1, row2 = lines[-2:]
 		names = row1[5:36]
-		doc = row2[:9]
 		family, given = self._split_names(names)
-		return doc, family, given
+		doc_field = row2[:9]
+		doc_cd = row2[9:10]
+		birth_field = row2[13:19]
+		birth_cd = row2[19:20]
+		exp_field = row2[21:27]
+		exp_cd = row2[27:28]
+		optional_field = row2[28:35]
+		final_cd = row2[35:36]
+		composite = doc_field + doc_cd + birth_field + birth_cd + exp_field + exp_cd + optional_field
+		return {
+			"type": "TD2",
+			"document_number": self._clean(doc_field),
+			"issuing_country": self._clean(row1[2:5]),
+			"nationality": self._clean(row2[10:13]),
+			"birth_date": birth_field,
+			"expiry_date": exp_field,
+			"sex": row2[20:21].replace("<", ""),
+			"optional_data": self._clean(optional_field),
+			"optional_data_1": None,
+			"optional_data_2": None,
+			"family_name": family,
+			"given_names": given,
+			"hashes": {
+				"document_number": self._verify(doc_field, doc_cd),
+				"birth_date": self._verify(birth_field, birth_cd),
+				"expiry_date": self._verify(exp_field, exp_cd),
+				"optional_data": self._verify(optional_field, row2[34:35]),
+				"final": self._verify(composite, final_cd),
+			},
+		}
 
 	def parse_td1(self, lines):
 		# TD1 has three lines; document number on line 1, names on line 3
 		line1, _, line3 = lines[-3:]
-		doc = line1[5:14]
 		names = line3[:30]
 		family, given = self._split_names(names)
-		return doc, family, given
+		doc_field = line1[5:14]
+		doc_cd = line1[14:15]
+		birth_field = lines[-2][0:6]
+		birth_cd = lines[-2][6:7]
+		exp_field = lines[-2][8:14]
+		exp_cd = lines[-2][14:15]
+		optional1 = line1[15:30]
+		optional2 = lines[-2][18:29]
+		final_cd = lines[-2][29:30]
+		composite = doc_field + doc_cd + birth_field + birth_cd + exp_field + exp_cd + optional1 + optional2
+		return {
+			"type": "TD1",
+			"document_number": self._clean(doc_field),
+			"issuing_country": self._clean(line1[2:5]),
+			"nationality": self._clean(lines[-2][15:18]),
+			"birth_date": birth_field,
+			"expiry_date": exp_field,
+			"sex": lines[-2][7:8].replace("<", ""),
+			"optional_data": None,
+			"optional_data_1": self._clean(optional1),
+			"optional_data_2": self._clean(optional2),
+			"family_name": family,
+			"given_names": given,
+			"hashes": {
+				"document_number": self._verify(doc_field, doc_cd),
+				"birth_date": self._verify(birth_field, birth_cd),
+				"expiry_date": self._verify(exp_field, exp_cd),
+				"optional_data": {"expected": None, "found": None, "valid": True},
+				"final": self._verify(composite, final_cd),
+			},
+		}
 
 	def parse_mrv_a(self, lines):
 		row1, row2 = lines[-2:]
-		names = row1[2:44]
-		doc = row2[:9]
+		names = row1[5:44]
 		family, given = self._split_names(names)
-		return doc, family, given
+		doc_field = row2[:9]
+		doc_cd = row2[9:10]
+		birth_field = row2[13:19]
+		birth_cd = row2[19:20]
+		exp_field = row2[21:27]
+		exp_cd = row2[27:28]
+		optional_field = row2[28:44]
+		final_cd = row2[43:44]
+		composite = doc_field + doc_cd + birth_field + birth_cd + exp_field + exp_cd + optional_field
+		return {
+			"type": "MRV-A",
+			"document_number": self._clean(doc_field),
+			"issuing_country": self._clean(row1[2:5]),
+			"nationality": self._clean(row2[10:13]),
+			"birth_date": birth_field,
+			"expiry_date": exp_field,
+			"sex": row2[20:21].replace("<", ""),
+			"optional_data": self._clean(optional_field),
+			"optional_data_1": None,
+			"optional_data_2": None,
+			"family_name": family,
+			"given_names": given,
+			"hashes": {
+				"document_number": self._verify(doc_field, doc_cd),
+				"birth_date": self._verify(birth_field, birth_cd),
+				"expiry_date": self._verify(exp_field, exp_cd),
+				"optional_data": self._verify(optional_field[:-1], optional_field[-1:]),
+				"final": self._verify(composite, final_cd),
+			},
+		}
 
 	def parse_mrv_b(self, lines):
 		row1, row2 = lines[-2:]
-		names = row1[2:36]
-		doc = row2[:9]
+		names = row1[5:36]
 		family, given = self._split_names(names)
-		return doc, family, given
+		doc_field = row2[:9]
+		doc_cd = row2[9:10]
+		birth_field = row2[13:19]
+		birth_cd = row2[19:20]
+		exp_field = row2[21:27]
+		exp_cd = row2[27:28]
+		optional_field = row2[28:36]
+		final_cd = row2[35:36]
+		composite = doc_field + doc_cd + birth_field + birth_cd + exp_field + exp_cd + optional_field
+		return {
+			"type": "MRV-B",
+			"document_number": self._clean(doc_field),
+			"issuing_country": self._clean(row1[2:5]),
+			"nationality": self._clean(row2[10:13]),
+			"birth_date": birth_field,
+			"expiry_date": exp_field,
+			"sex": row2[20:21].replace("<", ""),
+			"optional_data": self._clean(optional_field),
+			"optional_data_1": None,
+			"optional_data_2": None,
+			"family_name": family,
+			"given_names": given,
+			"hashes": {
+				"document_number": self._verify(doc_field, doc_cd),
+				"birth_date": self._verify(birth_field, birth_cd),
+				"expiry_date": self._verify(exp_field, exp_cd),
+				"optional_data": self._verify(optional_field[:-1], optional_field[-1:]),
+				"final": self._verify(composite, final_cd),
+			},
+		}
 
 	def parse(self, mrz_text: str):
 		lines = [ln.strip() for ln in mrz_text.splitlines() if ln.strip()]
@@ -280,6 +442,14 @@ class MRZParser:
 			return {
 				"type": "UNKNOWN",
 				"document_number": None,
+				"issuing_country": None,
+				"nationality": None,
+				"birth_date": None,
+				"expiry_date": None,
+				"sex": None,
+				"optional_data": None,
+				"optional_data_1": None,
+				"optional_data_2": None,
 				"family_name": None,
 				"given_names": None,
 			}
@@ -294,15 +464,26 @@ class MRZParser:
 			"MRV-B": self.parse_mrv_b,
 		}
 
-		parser_fn = parsers.get(mrz_type, self.parse_td3)
-		doc, family, given = parser_fn(lines)
+		parser_fn = parsers.get(mrz_type)
+		if parser_fn is None:
+			return {
+				"type": "UNKNOWN",
+				"document_number": None,
+				"issuing_country": None,
+				"nationality": None,
+				"birth_date": None,
+				"expiry_date": None,
+				"sex": None,
+				"optional_data": None,
+				"optional_data_1": None,
+				"optional_data_2": None,
+				"family_name": None,
+				"given_names": None,
+			}
 
-		return {
-			"type": mrz_type,
-			"document_number": self._clean(doc),
-			"family_name": family,
-			"given_names": given,
-		}
+		parsed = parser_fn(lines)
+		parsed["type"] = mrz_type
+		return parsed
 
 
 def mrz(file_data):
@@ -313,10 +494,10 @@ def mrz(file_data):
 		file_data: Streamlit UploadedFile object or file-like object
 
 	Returns:
-		List containing [mrz_preprocessed, mrzText, PID, family_name, given_names]
+		List containing [mrz_preprocessed, mrzText, parsed_data]
 	"""
 	if file_data is None:
-		return [None, None, None, None, None]
+		return [None, None, None]
 
 	# Read image from uploaded file
 	file_bytes = np.frombuffer(file_data.read(), np.uint8)
@@ -324,7 +505,7 @@ def mrz(file_data):
 
 	if image is None:
 		print("[ERROR] could not decode image from uploaded file")
-		return [None, None, None, None, None]
+		return [None, None, None]
 
 	gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
@@ -342,7 +523,7 @@ def mrz(file_data):
 
 	if mrz is None:
 		print("[INFO] MRZ could not be found")
-		return [None, None, None, None, None]
+		return [None, None, None]
 
 	# Preprocess MRZ image
 	preprocessor = MRZPreprocessor(scale_factor=4.8)
@@ -366,15 +547,11 @@ def mrz(file_data):
 		mrzText = pytesseract.image_to_string(mrz_preprocessed, config=tesseract_config)
 	except Exception as e:
 		print(f"[ERROR] pytesseract failed: {e}")
-		return [None, None, None, None, None]
+		return [None, None, None]
 
 	mrzText = mrzText.replace(" ", "").strip()
 
 	parser = MRZParser()
 	parsed = parser.parse(mrzText)
-	td_type = parsed.get("type")
-	PID = parsed.get("document_number")
-	family_name = parsed.get("family_name")
-	given_names = parsed.get("given_names")
 
-	return [mrz_preprocessed, mrzText, PID, family_name, given_names, td_type]
+	return [mrz_preprocessed, mrzText, parsed]
